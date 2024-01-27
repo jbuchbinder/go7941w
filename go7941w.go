@@ -1,7 +1,6 @@
 package go7941w
 
 import (
-	"encoding/hex"
 	"fmt"
 	"log"
 	"time"
@@ -48,14 +47,12 @@ func (g *Go7941W) Open() error {
 
 func (g *Go7941W) ReadUID() error {
 	// 0x10 read UID number
-	cmd, err := hex.DecodeString("abba00100010")
+	err := g.sendCommand(0x00, GO7941W_CMD_READ_SECTOR, []byte{0x00})
 	if err != nil {
 		return err
 	}
-	log.Printf("%#v", cmd)
 
-	// TODO: FIXME: XXX: IMPLEMENT
-
+	_, err = g.readResponse(6)
 	return err
 }
 
@@ -119,15 +116,16 @@ func (g *Go7941W) ChangePassword(sector byte, group byte, oldPass []byte, newPas
 	return g.sendCommand(0x00, GO7941W_CMD_CHANGE_PASSWORD, data)
 }
 
-func (g *Go7941W) ReadID() error {
+func (g *Go7941W) ReadID() ([]byte, error) {
 	// 0x15 Read ID card number
-	var err error
-	cmd := []byte{0xab, 0xba, 0x00, 0x15, 0x00, 0x15}
-	log.Printf("%#v", cmd)
 
-	// TODO: FIXME: IMPLEMENT
+	data := []byte{}
 
-	return err
+	err := g.sendCommand(0x00, GO7941W_CMD_READ_ID, data)
+	if err != nil {
+		return []byte{}, err
+	}
+	return g.readResponse(32)
 }
 
 func (g *Go7941W) WriteT5577ID(id []byte) error {
@@ -139,32 +137,35 @@ func (g *Go7941W) WriteT5577ID(id []byte) error {
 	return g.sendCommand(0, GO7941W_CMD_WRITE_T5577, data)
 }
 
-func (g *Go7941W) ReadAll() error {
+func (g *Go7941W) ReadAll(group byte, password []byte) ([]byte, error) {
 	// 0x17 Read the data of all blocks in all local areas (M1-1K card)
-	var err error
-	cmd := []byte{0x0a, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1a}
-	if err != nil {
-		return err
+	if group != 0x0A && group != 0x0B {
+		return []byte{}, fmt.Errorf("group must be 0x0A or 0x0B")
 	}
-	log.Printf("%#v", cmd)
+	if len(password) != 6 {
+		return []byte{}, fmt.Errorf("password length != 6 (length was %d)", len(password))
+	}
 
-	// TODO: FIXME: IMPLEMENT
+	data := []byte{}
+	data = append(data, group)
+	data = append(data, password...)
 
-	return err
+	err := g.sendCommand(0x00, GO7941W_CMD_READ_DATA_ALL, data)
+	if err != nil {
+		return []byte{}, err
+	}
+
+	return g.readResponse(128)
 }
 
-func (g *Go7941W) ReadUltracardID() error {
+func (g *Go7941W) ReadUltracardID() ([]byte, error) {
 	// 0x19 Read tag card UID (Ultralight card)
-	var err error
-	cmd := []byte{0xab, 0xba, 0x00, 0x19, 0x00, 0x19}
+	err := g.sendCommand(0x00, GO7941W_CMD_READ_TAG_CARD_ULTRALIGHT, []byte{})
 	if err != nil {
-		return err
+		return []byte{}, err
 	}
-	log.Printf("%#v", cmd)
 
-	// TODO: FIXME: IMPLEMENT
-
-	return err
+	return g.readResponse(128)
 }
 
 func (g *Go7941W) WriteTagSector(sector byte, data []byte) error {
@@ -197,7 +198,7 @@ func (g *Go7941W) sendBytes(b []byte) error {
 }
 
 func (g *Go7941W) xorChecksum(b []byte) byte {
-	o := byte(0)
+	o := byte(0x00)
 	for _, x := range b {
 		o ^= x
 	}
@@ -234,6 +235,7 @@ func (g *Go7941W) parseResponse(in []byte) ([]byte, error) {
 	}
 	if in[3] == 0x81 {
 		dataLength := in[4]
+		log.Printf("datalength = %d", dataLength)
 		data := in[5 : 5+dataLength]
 		return data, nil
 	} else if in[3] == 0x80 {
